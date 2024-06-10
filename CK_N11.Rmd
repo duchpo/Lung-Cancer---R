@@ -1,0 +1,522 @@
+
+1.Tiến Hành load Library
+
+```{r}
+library(ROSE)
+library(caret)
+library(tidyverse)
+library(randomForest)
+library(ggplot2)
+library(caTools)
+library(e1071)
+library(class)
+library(proxy)
+library(rpart)
+library(rpart.plot)
+```
+
+2.Đọc file csv từ máy 
+
+```{r}
+lung_data <- read.csv("survey lung cancer.csv", header = T)
+head(lung_data)  
+```
+I.Data Visualization
+1.1.Data preprocessing(Tiền xử lí dữ liệu)
+
+```{r}
+#Đếm tổng số hàng trùng lặp trong DataFrame lung_data và in ra màn hình
+duplicate_count <- sum(duplicated(lung_data))
+cat("Total Duplicate Rows: ", duplicate_count, "\n")
+
+```
+```{r}
+print("------------remove duplicates process---------------")
+#Loại bỏ các hàng trùng lặp khỏi DataFrame lung_data và đếm lại số lượng hàng trùng lặp sau khi loại bỏ
+lung_data <- lung_data[!duplicated(lung_data), ]
+duplicate_count <- sum(duplicated(lung_data))
+
+#In ra màn hình số lượng hàng trùng lặp sau khi loại bỏ.
+cat("Total Duplicate Rows: ", duplicate_count, "\n")
+```
+
+Kết quả là thông tin cấu trúc của đối tượng lung_data sau khi thực hiện biến đổi. Các cột trừ "AGE" đã được chuyển đổi thành kiểu dữ liệu factor
+Bộ dữ liệu chứa 276 quan sát với 16 biến.
+Hầu hết các biến là các yếu tố nhị phân đại diện cho các thuộc tính khác nhau liên quan đến sức khỏe, chẳng hạn như thói quen hút thuốc, dị ứng và các bệnh mãn tính.
+Biến "AGE" là kiểu số.
+
+YES=2 , NO=1
+```{r}
+#Sử dụng toán tử %>% để chuyển đổi lung_data thành đối tượng pipe, giúp viết mã linh hoạt hơn.
+#hàm mutate để tạo ra một bản sao của lung_data với sự biến đổi được áp dụng. 
+#Hàm across để áp dụng biến đổi cho nhiều cột cùng một lúc.
+lung_data <- lung_data %>%
+  mutate(across(-AGE, as.factor))
+#Loại bỏ cột "AGE" khỏi danh sách cột cần biến đổi và chuyển đổi các cột còn lại thành kiểu dữ liệu factor         
+str(lung_data)
+```
+
+```{r}
+# tổng số lượng giá trị NA
+sum(is.na(lung_data))
+```
+
+1.2.Exploratory Data Analysis (EDA)
+ 
+
+Xác định các cột liên tục và phân loại trong tập dữ liệu. "AGE" được chọn làm cột liên tục, và tất cả các cột khác trừ "AGE" được xem là phân loại.
+
+
+```{r}
+continuous_columns <- c("AGE")
+categorical_columns <- names(lung_data)[names(lung_data) != "AGE"]
+```
+
+Tạo biểu đồ histogram để thể hiện phân phối của biến "AGE." Đối với biểu đồ này, binwidth (độ rộng của các khoảng) được đặt là 5
+
+```{r}
+# Plot 1: Distribution Plot
+ggplot(lung_data, aes(x = AGE)) +
+  geom_histogram(binwidth = 5, fill = "blue", color = "black") +
+  labs(title = "Distribution of AGE") +
+  scale_x_continuous(breaks = c(10, 20, 30, 40, 50, 60, 70, 80, 90)) +
+  theme_minimal()
+```
+Kiểm định Shapiro-Wilk để kiểm tra xem biến "AGE" có tuân theo phân phối chuẩn hay không.
+Giả thuyết không (H0): Giả thuyết không của kiểm định Shapiro-Wilk là dữ liệu tuân theo phân phối chuẩn.
+
+Giả thuyết nghich (H1): Giả thuyết nghịch là dữ liệu không tuân theo phân phối chuẩn.
+
+Trong trường hợp của chúng ta, giá trị p rất thấp (0.0001785), đề xuất có bằng chứng mạnh mẽ chống lại giả thuyết không.
+
+Nói cách khác, giá trị p nhỏ hơn mức ý nghĩa (alpha), thường được đặt là 0.05.
+Do đó, chúng ta sẽ từ chối giả thuyết  và kết luận rằng biến "AGE" trong tập dữ liệu của chúng ta không tuân theo phân phối chuẩn.
+
+Biểu đồ hộp thể hiện phân phối của "AGE" nhóm theo nhãn "LUNG_CANCER." Nó giúp so sánh phân phối của "AGE" giữa các nhóm.
+```{r}
+shapiro.test(lung_data$AGE)
+```
+ Biểu đồ boxplot phép so sánh phân phối nhóm tuổi giữa người bị ung thư và không bị ưng thư
+Biểu trên cho thấy rằng tuổi trung bình của những người mắc ung thư phổi cao hơn tuổi trung bình của những người không mắc ung thư phổi. Hộp bên trái của biểu đồ (đại diện cho những người không mắc ung thư phổi) có trung vị là 60.5, trong khi hộp bên phải (đại diện cho những người mắc ung thư phổi) có trung vị là 63. 
+
+Dựa trên thông tin này, có thể suy ra rằng tuổi là một yếu tố nguy cơ cho ung thư phổi. Những người mắc ung thư phổi có xu hướng già hơn những người không mắc ung thư phổi.
+```{r}
+# tính trung vị cho mỗi nhóm 
+median_values <- aggregate(AGE ~ LUNG_CANCER, data = lung_data, median)
+
+# vẽ biểu đồ BoxPlot 
+ggplot(lung_data, aes(x = LUNG_CANCER, y = AGE, fill = LUNG_CANCER)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of AGE by LUNG_CANCER",
+       x = "Lung Cancer Status",
+       y = "Age") +
+  scale_fill_manual(values = c("pink", "blue"), name = "Lung Cancer") +
+  theme_minimal() +
+
+  # thêm giá trị trung vị vào hình vẽ 
+  geom_text(data = median_values,
+            aes(x = LUNG_CANCER, y = AGE, label = paste("Median:", round(AGE, 2))),
+            vjust = -0.5,
+            color = "black",
+            size = 3)
+
+```
+
+Biểu đồ cột được tạo cho mỗi biến phân loại. Mỗi biểu đồ so sánh số lượng các nhãn trong biến phân loại giữa các nhóm của "LUNG_CANCER."
+```{r}
+num_plots <- length(categorical_columns)
+cols_per_row <- 2
+num_rows <- ceiling(num_plots / cols_per_row)
+
+colors <- c("#008080", "#FF8C00")
+
+create_plot <- function(var_name) {
+  
+    ggplot_object <- ggplot(lung_data, aes_string(x = categorical_columns[index], fill = "LUNG_CANCER")) +
+      geom_bar(aes(fill = LUNG_CANCER), position = "dodge", color = "black") +
+      labs(title = paste("Count of", var_name, "by LUNG_CANCER")) +
+      geom_text(aes(label = after_stat(count), y = after_stat(count)), stat = "count", position = position_dodge(width = 0.9), vjust = -0.5) +
+      scale_fill_manual(values = colors) +
+      guides(fill = guide_legend(title = "LUNG_CANCER")) +
+      theme_minimal()
+      
+  
+  return(ggplot_object)
+}
+
+for (index in 1:num_plots) {
+  iteration_plot <- create_plot(categorical_columns[index])
+  print(iteration_plot)
+}
+
+print("NO=1 \n YES=2")
+```
+In ra bảng phân phối của biến "LUNG_CANCER" trước khi thực hiện bất kỳ mở rộng dữ liệu nào. Nó cho biết số lượng "NO" Và "YES"
+```{r}
+print("Xem xét phân phối nhãn trước khi lấy mẫu quá mức")
+table(lung_data$LUNG_CANCER)
+```
+
+1.3.Oversampling the minority class.
+
+Mục đích lấy mẫu quá mức lớp thiểu số (LUNG_CANCER = 1) trong lung_data tập dữ liệu bằng cách sử dụng gói ROSE, sau đó in bảng để hiển thị phân bổ lớp trong tập dữ liệu được lấy mẫu quá mức thu được. Việc lấy mẫu quá mức này thường được thực hiện để giải quyết các tập dữ liệu mất cân bằng, trong đó một lớp được thể hiện dưới mức đáng kể so với lớp kia.
+
+```{r}
+# Thực hiện oversampling cho biến mục tiêu LUNG_CANCER sử dụng phương pháp ROSE
+lung_data_oversampled <- ROSE(LUNG_CANCER ~ ., data = lung_data, seed = 42)$data
+# In ra màn hình thông điệp kiểm tra phân phối của các lớp trong dữ liệu sau khi oversampled
+print('Kiểm tra phân phối lớp trong dữ liệu được lấy mẫu quá mức')
+table(lung_data_oversampled$LUNG_CANCER)
+```
+1.4.Train-Test split.
+
+Mục đích  này đang chuẩn bị dữ liệu cho mô hình học máy bằng cách chia dữ liệu được lấy mẫu quá mức thành các tập huấn luyện và kiểm tra. Tập huấn luyện chứa 70% dữ liệu và tập kiểm tra chứa 30% còn lại. Việc sử dụng set.seed đảm bảo rằng việc phân chia ngẫu nhiên có thể lặp lại được. Việc phân chia tập huấn luyện và kiểm tra này là một phương pháp phổ biến trong học máy để đánh giá hiệu suất của một mô hình trên dữ liệu chưa được nhìn thấy.
+
+
+```{r}
+set.seed(42)
+
+train_index <- createDataPartition(lung_data_oversampled$LUNG_CANCER, p = 0.7, list = F)
+train_data <- lung_data_oversampled[train_index, ]
+test_data <- lung_data_oversampled[-train_index, ]
+```
+```{r}
+# Kiểm tra sự phân bổ lớp trong tập huấn luyện và kiểm tra
+print('___train___')
+table(train_data$LUNG_CANCER)
+print('___test___')
+table(test_data$LUNG_CANCER)
+```
+
+II.Data Modeling
+
+2.1.Decesion tree.
+Đoạn mã này thực hiện toàn bộ quá trình xây dựng bộ phân loại cây quyết định, điều chỉnh siêu tham số, đánh giá các mô hình bằng xác thực chéo, chọn mô hình tốt nhất và trình bày kết quả. Cây quyết định sau đó được hiển thị để giải thích tốt hơn.
+
+
+```{r}
+# Tạo mô hình cây quyết định
+dt_classifier <- rpart(formula = LUNG_CANCER ~ ., data = train_data, method = "class", control = rpart.control(minsplit = 2, minbucket = 1))
+
+# Xác định lưới tham số để điều chỉnh mô hình cây quyết định
+param_grid <- expand.grid(
+  criterion = c("gini", "entropy"), # Tiêu chí đánh giá chất lượng tách
+  max_depth = c(Inf, 5, 10, 15),     # Độ sâu tối đa của cây
+  minsplit = c(2, 5, 10),            # Số quan sát tối thiểu để thực hiện phân tách
+  minbucket = c(1, 2, 4)             # Số quan sát tối thiểu trong nút lá
+)
+
+# Tạo danh sách trống để lưu trữ các mô hình
+models <- list()
+
+# Lặp qua lưới tham số
+for (i in 1:nrow(param_grid)) {
+  # Thiết lập các tham số
+  criterion <- param_grid$criterion[i]
+  max_depth <- param_grid$max_depth[i]
+  minsplit <- param_grid$minsplit[i]
+  minbucket <- param_grid$minbucket[i]
+  
+  # Tạo mô hình với các tham số hiện tại
+  model <- rpart(formula = LUNG_CANCER ~ ., data = train_data, method = "class", control = rpart.control(minsplit = minsplit, minbucket = minbucket))
+  
+  # Lưu trữ mô hình trong danh sách với giá trị tham số làm tên
+  model_name <- paste0("criterion=", criterion, "_max_depth=", max_depth, "_minsplit=", minsplit, "_minbucket=", minbucket)
+  models[[model_name]] <- model
+}
+# Đánh giá mô hình
+# Tính độ chính xác cho mỗi mô hình sử dụng kiểm định chéo
+accuracies <- sapply(models, function(model) {
+  y_pred <- predict(model, newdata = test_data, type = "class")
+  accuracy <- sum(y_pred == test_data$LUNG_CANCER) / nrow(test_data)
+  return(accuracy)
+})
+
+# Tìm mô hình tốt nhất dựa trên độ chính xác cao nhất
+best_model <- models[[names(accuracies)[which.max(accuracies)]]]
+
+# Lấy các tham số tốt nhất
+best_params <- strsplit(names(accuracies)[which.max(accuracies)], "_")[[1]]
+best_params <- setNames(sapply(best_params, function(param) {
+  value <- gsub(".*=", "", param)
+  value <- ifelse(value == "Inf", as.numeric(NA), as.numeric(value))
+  return(value)
+}), c("criterion", "max_depth", "minsplit", "minbucket"))
+
+# Dự đoán trên tập kiểm thử bằng mô hình tốt nhất
+y_pred <- predict(best_model, newdata = test_data, type = "class")
+
+# Đánh giá mô hình
+accuracy <- sum(y_pred == test_data$LUNG_CANCER) / nrow(test_data)
+report <- table(test_data$LUNG_CANCER, y_pred)
+
+
+```
+
+
+
+```{r}
+# In ra các tham số tốt nhất, độ chính xác của mô hình và ma trận nhầm lẫn
+cat("Các tham số tốt nhất:\n")
+print(best_params)
+
+cat("\nĐộ chính xác của mô hình:\n")
+print(accuracy)
+
+cat("\nConfusion Matrix:\n")
+print(report)
+
+# Vẽ đồ thị cây quyết định
+rpart.plot(best_model, type = 2, extra = 1, under = TRUE, tweak = 1.2)
+
+```
+
+
+2.2.SVM- support vector machine.
+
+Đoạn mã  này là thực hiện quy trình huấn luyện và đánh giá một mô hình Support Vector Machine (SVM) trên dữ liệu đã chia thành tập đào tạo (train_data) và tập kiểm tra (test_data).
+
+
+```{r}
+
+library(e1071)
+
+```
+
+```{r}
+# Huấn luyện mô hình SVM
+svm_model <- svm(LUNG_CANCER ~ ., data = train_data, kernel = "radial", probability = TRUE)
+
+# Dự đoán trên tập kiểm tra bằng mô hình SVM
+svm_predictions <- predict(svm_model, newdata = test_data)
+
+# Đánh giá mô hình SVM
+svm_accuracy <- mean(svm_predictions == test_data$LUNG_CANCER)
+svm_report <- table(test_data$LUNG_CANCER, svm_predictions)
+
+# In độ chính xác và ma trận nhầm lẫn của mô hình SVM
+cat("Độ chính xác của mô hình SVM:", svm_accuracy, "\n")
+print("Ma trận nhầm lẫn của SVM:")
+print(svm_report)
+
+# Kết hợp nhãn thực tế và dự đoán trên tập kiểm tra
+svm_results <- data.frame(Thực_tế = test_data$LUNG_CANCER, Dự_đoán = svm_predictions)
+
+```
+
+```{r}
+# Tạo biểu đồ ma trận nhầm bằng ggplot2
+svm_confusion_plot <- ggplot(svm_results, aes(x = factor(Dự_đoán), fill = factor(Thực_tế))) +
+  geom_bar(position = "dodge") +
+  labs(title = "SVM Confusion Matrix",
+       x = "Predicted",
+       y = "Count",
+       fill = "Actual") +
+  theme_minimal()
+
+# Hiển thị biểu đồ
+print(svm_confusion_plot)
+
+```
+
+
+2.3.KNN-K-Nearest Neighbors.
+Đoạn mã này thực hiện chuỗi các bước tiền xử lý dữ liệu, đánh giá và huấn luyện mô hình K-neighbors classifier, sau đó đánh giá hiệu suất của mô hình và vẽ biểu đồ độ chính xác.
+
+
+```{r}
+#Kiểm tra các giá trị còn thiếu trong dữ liệu train và test
+any(is.na(X_train))
+any(is.na(y_train))
+any(is.na(X_test))
+
+```
+
+```{r}
+# Xóa các hàng có giá trị bị thiếu
+X_train <- na.omit(X_train)
+y_train <- na.omit(y_train)
+X_test <- na.omit(X_test)
+
+```
+
+```{r}
+# Đổi các tất cả dữ liệu thành số
+X_train <- as.data.frame(sapply(X_train, as.numeric))
+X_test <- as.data.frame(sapply(X_test, as.numeric))
+
+
+```
+
+```{r}
+
+
+# Tính ma trận confusion
+calculate_confusion_matrix <- function(actual, predicted) {
+  table(actual, predicted)
+}
+
+# Tính các chỉ số precision, recall, and F1-score
+calculate_classification_report <- function(actual, predicted) {
+  confusion_matrix <- calculate_confusion_matrix(actual, predicted)
+  precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+  recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+  f1_score <- 2 * (precision * recall) / (precision + recall)
+  return(c(precision = precision, recall = recall, f1_score = f1_score))
+}
+
+# vẽ ma trận confusion
+plot_confusion_matrix <- function(confusion_matrix) {
+  heatmap(confusion_matrix, Colv=NA, Rowv=NA, col = c("white", "blue"), margins=c(1,1), cexCol=0.8, cexRow=0.8, main="Confusion Matrix")
+}
+
+# khảo sát K-neighbors classifier bởi các giá trị từ 3 đến 15 
+knn_scores <- numeric(0)
+
+for (k in 3:15) {
+  knn <- knn(train = X_train, test = X_test, cl = y_train, k = k)
+  scores <- sum(knn == y_test) / length(y_test)
+  knn_scores <- c(knn_scores, scores)
+  knn_accuracy <- sum(knn == y_test) / length(y_test)
+  cat("kNN Model Accuracy for k =", k, ":", knn_accuracy, "\n")
+
+
+}
+
+x_ticks <- 3:15
+x_labels <- x_ticks
+
+plot(x_ticks, knn_scores, type="l", xlab="Number of Neighbors (k)", ylab="Accuracy", main="K-neighbors Classifier", col="blue", lwd=2)
+axis(1, at=x_ticks, labels=x_labels)
+grid()
+
+# Train the K-neighbors classifier with k = 9
+knn <- knn(train = X_train, test = X_test, cl = y_train, k = 9)
+
+# Calculate and print accuracy
+knn_accuracy <- sum(knn == y_test) / length(y_test)
+cat("kNN Model Accuracy......:", knn_accuracy, "\n")
+
+
+# Calculate and print classification report
+classification_report <- calculate_classification_report(y_test, knn)
+cat("Precision:", classification_report["precision"], "\n")
+cat("Recall:", classification_report["recall"], "\n")
+cat("F1-Score:", classification_report["f1_score"], "\n")
+
+
+```
+
+
+2.4.Random Forest.
+
+Đoạn mã này thực hiện việc tối ưu hóa số lượng cây trong mô hình Random Forest và minh họa độ chính xác của mô hình trong quá trình này bằng biểu đồ miền, giúp lựa chọn số lượng cây tối ưu cho mô hình dự đoán.
+
+
+```{r}
+# Số cây bạn muốn xây dựng (thay thế số 100 bằng số cây mong muốn)
+num_trees <- 100
+
+# Xây dựng mô hình với số cây được chọn
+rf_model_custom_trees <- randomForest(LUNG_CANCER ~ ., data = train_data, ntree = num_trees, probability = TRUE)
+
+# Dự đoán và đánh giá mô hình
+rf_predictions_custom_trees <- predict(rf_model_custom_trees, newdata = test_data)
+accuracy_rf_custom_trees <- mean(rf_predictions_custom_trees == test_data$LUNG_CANCER)
+print(paste("Accuracy with", num_trees, "trees:", accuracy_rf_custom_trees))
+# Tìm độ chính xác cao nhất và số cây tương ứng
+max_accuracy <- max(accuracy_vector)
+optimal_num_trees <- num_trees_options[which.max(accuracy_vector)]
+
+# In ra kết quả
+print(paste("Optimal number of trees:", optimal_num_trees))
+print(paste("Maximum accuracy:", max_accuracy))
+
+
+
+```
+
+```{r}
+# Tạo một dãy số lượng cây tùy chọn (ví dụ: từ 50 đến 800, mỗi bước là 10 cây)
+num_trees_options <- seq(100, 800, by = 10)
+
+# Tạo vectơ để lưu độ chính xác tương ứng với mỗi số lượng cây
+accuracy_vector <- numeric(length = length(num_trees_options))
+
+# Vòng lặp qua mỗi số lượng cây, xây dựng mô hình và đánh giá độ chính xác
+for (i in seq_along(num_trees_options)) {
+  num_trees <- num_trees_options[i]
+  rf_model_custom_trees <- randomForest(LUNG_CANCER ~ ., data = train_data, ntree = num_trees, probability = TRUE)
+  rf_predictions_custom_trees <- predict(rf_model_custom_trees, newdata = test_data)
+  accuracy_vector[i] <- mean(rf_predictions_custom_trees == test_data$LUNG_CANCER)
+}
+
+```
+
+
+```{r}
+# Tính độ chính xác và khoảng tin cậy cho mỗi số lượng cây
+accuracy_df <- data.frame(
+  num_trees = num_trees_options,
+  accuracy = accuracy_vector,
+  lower_ci = accuracy_vector - 1.96 * sqrt(accuracy_vector * (1 - accuracy_vector) / length(test_data$LUNG_CANCER)),
+  upper_ci = accuracy_vector + 1.96 * sqrt(accuracy_vector * (1 - accuracy_vector) / length(test_data$LUNG_CANCER))
+)
+```
+
+
+```{r}
+
+# Vẽ biểu đồ miền
+ggplot(accuracy_df, aes(x = num_trees, y = accuracy)) +
+  geom_line(color = "blue", size = 1) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "lightblue", alpha = 0.3) +
+  labs(title = "Accuracy vs. Number of Trees in Random Forest with Confidence Interval",
+       x = "Number of Trees", y = "Accuracy") +
+  theme_minimal()
+
+```
+
+III. Comparison Model
+
+```{r}
+# Các điểm số độ chính xác của mô hình
+model_names <- c("Random Forest", "Decision Tree", "kNN", "SVM")
+
+accuracy_scores <- c(max_accuracy, accuracy, knn_accuracy, svm_accuracy)
+
+# Tạo dataframe
+model_comparison_df <- data.frame(Model = model_names, Accuracy = accuracy_scores)
+
+# Sử dụng thư viện ggplot2 để vẽ biểu đồ cột
+library(ggplot2)
+
+# Vẽ biểu đồ cột
+ggplot(model_comparison_df, aes(x = Model, y = Accuracy, fill = Model)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Model Comparison - Model Accuracy",
+       x = "Model",
+       y = "Model Accuracy") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 40, hjust = 1, vjust = 1),
+        legend.position = "none") +
+  ylim(0, 1)
+# Độ chính xác của Random Forest
+print(paste("Random Forest Accuracy:", max_accuracy))
+
+# Độ chính xác của Decision Tree
+print(paste("Decision Tree Accuracy:", accuracy))
+
+# Độ chính xác của SVM
+print(paste("SVM Accuracy:", svm_accuracy))
+
+# Độ chính xác của kNN
+print(paste("kNN Accuracy:", knn_accuracy))
+
+
+```
+
+IV.Kết luận.
+
+Dựa vào so sánh trên ta thấy Random Forest có độ chính xác cao hơn các mô hình còn lại.
+
